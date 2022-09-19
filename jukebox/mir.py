@@ -23,19 +23,27 @@ DEPTH = 36
 
 # --------------------
 
+def preprocess_audio(audio: np.ndarray, sr: int):
+    # resample
+    audio = lr.resample(audio, sr, JUKEBOX_SAMPLE_RATE)
 
-def load_audio_from_file(fpath):
-    audio, _ = lr.load(fpath, sr=JUKEBOX_SAMPLE_RATE)
+    # downmix if mono
     if audio.ndim == 1:
         audio = audio[np.newaxis]
+    assert audio.ndim == 2, "audio must have shape (n_channels, n_samples)"
     audio = audio.mean(axis=0)
 
     # normalize audio
     norm_factor = np.abs(audio).max()
     if norm_factor > 0:
         audio /= norm_factor
-
+    
     return audio.flatten()
+
+
+def load_audio_from_file(fpath):
+    audio, _ = lr.load(fpath, sr=JUKEBOX_SAMPLE_RATE)
+    return preprocess_audio(audio, JUKEBOX_SAMPLE_RATE)
 
 
 def audio_padding(audio, target_length):
@@ -106,6 +114,12 @@ def get_final_activations(z, x_cond, y_cond, top_prior):
 def get_acts_from_file(fpath, hps, vqvae, top_prior, meanpool):
     audio = load_audio_from_file(fpath)
 
+    return get_acts_from_array(audio, JUKEBOX_SAMPLE_RATE, hps, vqvae, top_prior, meanpool)
+
+
+def get_acts_from_array(audio: np.ndarray, sr: int, hps, vqvae, top_prior, meanpool):
+    audio = preprocess_audio(audio, sr)
+
     # zero padding
     if audio.shape[0] < SAMPLE_LENGTH:
         audio = audio_padding(audio, SAMPLE_LENGTH)
@@ -130,30 +144,17 @@ def get_acts_from_file(fpath, hps, vqvae, top_prior, meanpool):
     return acts
 
 
-if __name__ == "__main__":
-
-    # --- SETTINGS ---
-
-    DEVICE = 'cuda'
-    VQVAE_MODELPATH = "/import/c4dm-02/jukemir-model/models/5b/vqvae.pth.tar"
-    PRIOR_MODELPATH = "/import/c4dm-02/jukemir-model/models/5b/prior_level_2.pth.tar"
-    INPUT_DIR = r"/homes/yz007/BUTTER_v2/westone-dataset/WAV/"
-    OUTPUT_DIR = r"/homes/yz007/BUTTER_v2/jukemir/output/"
-    AVERAGE_SLICES = 32  # For average pooling. "1" means average all frames.
-    #  Since the output shape is 8192 * 4800, the params bust can divide 8192.
-    USING_CACHED_FILE = False
+def load_vqvae_and_prior(
+    vqvae_path: str,
+    prior_path: str,
+    device: str = 'cuda'
+):
+    """
+    returns the loaded vqvae and prior, as well as the hparams
+    """
     model = "5b"  # might not fit to other settings, e.g., "1b_lyrics" or "5b_lyrics"
 
-    # --- SETTINGS ---
-    input_dir = pathlib.Path(INPUT_DIR)
-    output_dir = pathlib.Path(OUTPUT_DIR)
-    input_paths = sorted(list(input_dir.iterdir()))
-    # filter
-    input_paths = list(filter(lambda x: x.name.endswith('.wav'), input_paths))
-    
-    device = DEVICE
-    # Set up VQVAE
-
+    # setup vqvae
     hps = Hyperparams()
     hps.sr = 44100
     hps.n_samples = 8
@@ -164,7 +165,7 @@ if __name__ == "__main__":
     hps.hop_fraction = [0.5, 0.5, 0.125]
     vqvae, *priors = MODELS[model]
     hps_1 = setup_hparams(vqvae, dict(sample_length=SAMPLE_LENGTH))
-    hps_1.restore_vqvae = VQVAE_MODELPATH
+    hps_1.restore_vqvae = vqvae_path
     vqvae = make_vqvae(
         hps_1, device
     )
@@ -172,8 +173,30 @@ if __name__ == "__main__":
     # Set up language model
     hps_2 = setup_hparams(priors[-1], dict())
     hps_2["prior_depth"] = DEPTH
-    hps_2.restore_prior = PRIOR_MODELPATH
+    hps_2.restore_prior = prior_path
     top_prior = make_prior(hps_2, vqvae, device)
+
+    return vqvae, top_prior, hps
+
+
+def embed_from_folder(
+    input_dir: str, 
+    output_dir: str, 
+    vqvae_path: str, 
+    prior_path: str, 
+    average_pool_slices: int = 32, # For average pooling. "1" means average all frames. must be divisible by 8192
+    device: str = 'cuda'
+):
+    USING_CACHED_FILE = False # 
+
+    # --- SETTINGS ---
+    input_dir = pathlib.Path(input_dir)
+    output_dir = pathlib.Path(output_dir)
+    input_paths = sorted(list(input_dir.iterdir()))
+    # filter
+    input_paths = list(filter(lambda x: x.name.endswith('.wav'), input_paths))
+    
+    vqvae, top_prior, hps = load_vqvae_and_prior(vqvae_path, prior_path, device)
 
     for input_path in tqdm(input_paths):
         # Check if output already exists
@@ -186,7 +209,50 @@ if __name__ == "__main__":
         # Decode, resample, convert to mono, and normalize audio
         with torch.no_grad():
             representation = get_acts_from_file(
-                input_path, hps, vqvae, top_prior, meanpool=AVERAGE_SLICES
+                input_path, hps, vqvae, top_prior, meanpool=average_pool_slices
             )
 
         np.save(output_path, representation)
+
+
+def embed_from_array(
+    audio: np.ndarray, 
+    sr: int, 
+    vqvae_path: str, 
+    prior_path: str, 
+    average_pool_slices: int = 32, # For average pooling. "1" means average all frames. must be divisible by 8192
+    device: str = 'cuda'
+):
+    vqvae, top_prior, hps = load_vqvae_and_prior(vqvae_path, prior_path, device)
+
+    with torch.no_grad():
+        representation = get_acts_from_array(
+            audio, sr, hps, vqvae, top_prior, meanpool=average_pool_slices
+        )
+
+    return representation
+
+
+
+
+
+if __name__ == "__main__":
+
+    # --- SETTINGS ---
+
+    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    VQVAE_MODELPATH = "/import/c4dm-02/jukemir-model/models/5b/vqvae.pth.tar"
+    PRIOR_MODELPATH = "/import/c4dm-02/jukemir-model/models/5b/prior_level_2.pth.tar"
+    INPUT_DIR = r"/homes/yz007/BUTTER_v2/westone-dataset/WAV/"
+    OUTPUT_DIR = r"/homes/yz007/BUTTER_v2/jukemir/output/"
+    AVERAGE_SLICES = 32  
+
+    embed_from_folder(
+        input_dir=INPUT_DIR,
+        output_dir=OUTPUT_DIR,
+        vqvae_path=VQVAE_MODELPATH,
+        prior_path=PRIOR_MODELPATH,
+        average_pool_slices=AVERAGE_SLICES,
+        device=DEVICE
+    )
+    

@@ -216,15 +216,9 @@ def embed_from_folder(
 
 
 def embed_from_array(
-    audio: np.ndarray, 
-    sr: int, 
-    vqvae_path: str, 
-    prior_path: str, 
-    average_pool_slices: int = 32, # For average pooling. "1" means average all frames. must be divisible by 8192
-    device: str = 'cuda'
+    vqvae, top_prior, hps, 
+    audio: np.ndarray, sr: int, average_pool_slices: int = 32
 ):
-    vqvae, top_prior, hps = load_vqvae_and_prior(vqvae_path, prior_path, device)
-
     with torch.no_grad():
         representation = get_acts_from_array(
             audio, sr, hps, vqvae, top_prior, meanpool=average_pool_slices

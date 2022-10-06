@@ -120,7 +120,7 @@ class ConditionalAutoregressive2D(nn.Module):
             x = self.preprocess(x)
 
         N, D = x.shape
-        assert isinstance(x, t.cuda.LongTensor)
+        assert isinstance(x, t.LongTensor) or isinstance(x, t.cuda.LongTensor)
         assert (0 <= x).all() and (x < self.bins).all()
 
         if self.y_cond:

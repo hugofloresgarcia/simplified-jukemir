@@ -86,7 +86,7 @@ class Labeller():
         assert len(infos) == len(metas)
         return dict(y=ys, info=infos)
 
-    def set_y_lyric_tokens(self, ys, labels):
+    def set_y_lyric_tokens(self, ys, labels, device='cpu'):
         info = labels['info']
         assert ys.shape[0] == len(info)
         if self.n_tokens > 0:
@@ -99,7 +99,7 @@ class Labeller():
                 tokens, indices = get_relevant_lyric_tokens(full_tokens, self.n_tokens, total_length, offset, duration)
                 tokens_list.append(tokens)
                 indices_list.append(indices)
-            ys[:, -self.n_tokens:] = t.tensor(tokens_list, dtype=t.long, device='cuda')
+            ys[:, -self.n_tokens:] = t.tensor(tokens_list, dtype=t.long, device=device)
             return indices_list
         else:
             return None

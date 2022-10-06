@@ -60,6 +60,8 @@ class SimplePrior(nn.Module):
         # Y conditioning
         self.y_cond = labels
 
+        self.device = "cuda" if t.cuda.is_available else "cpu"
+
         self.single_enc_dec = single_enc_dec
         # X conditioning
         if self.x_cond:
@@ -149,7 +151,7 @@ class SimplePrior(nn.Module):
         y[:, 1:2] = y[:, 1:2] + int(start * self.raw_to_tokens)
 
         # Set lyric tokens
-        indices = self.labeller.set_y_lyric_tokens(y, labels)
+        indices = self.labeller.set_y_lyric_tokens(y, labels, device=self.device)
         if get_indices:
             return y, indices
         else:

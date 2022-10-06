@@ -56,8 +56,10 @@ def audio_padding(audio, target_length):
 def get_z(audio, vqvae):
     # don't compute unnecessary discrete encodings
     audio = audio[: JUKEBOX_SAMPLE_RATE * 25]
+    device= next(vqvae.parameters()).device
+    audio = torch.from_numpy(audio).float().to(device)
 
-    zs = vqvae.encode(torch.cuda.FloatTensor(audio[np.newaxis, :, np.newaxis]))
+    zs = vqvae.encode(audio[np.newaxis, :, np.newaxis])
 
     z = zs[-1].flatten()[np.newaxis, :]
 
@@ -87,7 +89,8 @@ def get_cond(hps, top_prior):
                 ),
             ] * hps.n_samples
 
-    labels = [None, None, top_prior.labeller.get_batch_labels(metas, "cuda")]
+    device = next(top_prior.parameters()).device
+    labels = [None, None, top_prior.labeller.get_batch_labels(metas, device)]
 
     x_cond, y_cond, prime = top_prior.get_cond(None, top_prior.get_y(labels[-1], 0))
 
